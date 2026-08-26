@@ -1,0 +1,24 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 7 */1 * *' # 每6小时运行一次
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  sync_latest_from_upstream:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.fork }} # 只在 Fork 仓库中运行
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync upstream changes
+        id: sync
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+        with:
+          upstream_sync_repo: iptv-org/epg
+          upstream_sync_branch: master
+          target_sync_branch: master
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }} # 使用自动生成的 Token
+          test_mode: false
