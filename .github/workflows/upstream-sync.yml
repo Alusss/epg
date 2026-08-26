@@ -20,5 +20,5 @@ jobs:
           upstream_sync_repo: iptv-org/epg
           upstream_sync_branch: master
           target_sync_branch: master
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }} # 使用自动生成的 Token
+          target_repo_token: ${{ secrets.PAT }} # 使用自动生成的 Token
           test_mode: false
