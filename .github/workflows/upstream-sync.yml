@@ -6,19 +6,28 @@ on:
   workflow_dispatch: # 允许手动触发
 
 jobs:
-  sync_latest_from_upstream:
+  sync:
     runs-on: ubuntu-latest
-    if: ${{ github.event.repository.fork }} # 只在 Fork 仓库中运行
+    if: ${{ github.event.repository.fork }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Sync upstream changes
-        id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          upstream_sync_repo: iptv-org/epg
-          upstream_sync_branch: master
-          target_sync_branch: master
-          target_repo_token: ${{ secrets.PAT }} # 使用自动生成的 Token
-          test_mode: false
+          fetch-depth: 0
+          token: ${{ secrets.PAT }}
+
+      - name: Sync upstream
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/iptv-org/epg.git
+          git fetch upstream master
+
+          git checkout master
+          git reset --hard upstream/master
+
+          git push origin master --force
