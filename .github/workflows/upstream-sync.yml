@@ -2,8 +2,15 @@ name: Upstream Sync
 
 on:
   schedule:
-    - cron: '0 */4 * * *' # 每6小时运行一次
+    - cron: '0 */4 * * *' # 每 4 小时同步一次
   workflow_dispatch: # 允许手动触发
+
+permissions:
+  contents: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
 
 jobs:
   sync:
@@ -14,20 +21,58 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: master
           fetch-depth: 0
-          token: ${{ secrets.PAT }}
 
       - name: Sync upstream
+        env:
+          UPSTREAM_REPO: https://github.com/iptv-org/epg.git
+          UPSTREAM_BRANCH: master
+          TARGET_BRANCH: master
         run: |
-          set -e
+          set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git remote add upstream https://github.com/iptv-org/epg.git
-          git fetch upstream master
+          git remote add upstream "$UPSTREAM_REPO" 2>/dev/null \
+            || git remote set-url upstream "$UPSTREAM_REPO"
+          git fetch upstream "$UPSTREAM_BRANCH"
 
-          git checkout master
-          git reset --hard upstream/master
+          if git merge-base --is-ancestor "upstream/$UPSTREAM_BRANCH" "origin/$TARGET_BRANCH"; then
+            echo "已经是最新版本，无需同步。"
+            exit 0
+          fi
 
-          git push origin master --force
+          # 在 tree 层面合并，避免 checkout 因换行符转换产生的“伪修改”阻塞 merge。
+          MERGED_TREE=$(git merge-tree --write-tree \
+            "origin/$TARGET_BRANCH" "upstream/$UPSTREAM_BRANCH")
+
+          # GITHUB_TOKEN 无权修改 .github/workflows，因此保留 fork 自己的
+          # workflow 文件（包括本文件），不跟随 upstream 更新。
+          TMP_INDEX_DIR=$(mktemp -d)
+          export GIT_INDEX_FILE="$TMP_INDEX_DIR/index"
+          trap 'rm -rf "$TMP_INDEX_DIR"' EXIT
+
+          git read-tree "$MERGED_TREE"
+          git rm -r --cached -f --quiet --ignore-unmatch .github/workflows
+          if git cat-file -e "origin/$TARGET_BRANCH:.github/workflows" 2>/dev/null; then
+            git read-tree --prefix=.github/workflows/ \
+              "$(git rev-parse "origin/$TARGET_BRANCH:.github/workflows")"
+          fi
+          FINAL_TREE=$(git write-tree)
+          rm -rf "$TMP_INDEX_DIR"
+          trap - EXIT
+          unset GIT_INDEX_FILE
+
+          if [ "$FINAL_TREE" = "$(git rev-parse "origin/$TARGET_BRANCH^{tree}")" ]; then
+            echo "upstream 只有 workflow 文件变更，已跳过。"
+            exit 0
+          fi
+
+          MERGE_COMMIT=$(git commit-tree "$FINAL_TREE" \
+            -p "origin/$TARGET_BRANCH" \
+            -p "upstream/$UPSTREAM_BRANCH" \
+            -m "Merge upstream iptv-org/epg into $TARGET_BRANCH")
+
+          git push origin "$MERGE_COMMIT:refs/heads/$TARGET_BRANCH"
